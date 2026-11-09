@@ -58,7 +58,7 @@ jobs:
       matrix:
         include:
           # Qoka 0.3.0 release: macOS (Apple Silicon) + Windows.
-          - { os: macos-14, plat: darwin, arch: arm64, nodearch: arm64 }
+          - { os: macos-15, plat: darwin, arch: arm64, nodearch: arm64 }
           - { os: windows-latest, plat: win32, arch: x64, nodearch: x64 }
           # Intel macOS + Linux stay disabled for now (Intel .dmg is cross-built
           # on the ARM runner because GitHub's macos-13 Intel runner hangs, and
