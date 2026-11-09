@@ -389,6 +389,7 @@ import './contrib/ariaNotebook/browser/ariaNotebook.contribution.js';
 import './contrib/ariaProjectOverview/browser/ariaProjectOverview.contribution.js';
 import './contrib/ariaAutopipe/browser/ariaAutopipe.contribution.js';
 import './contrib/ariaConnections/browser/ariaConnections.contribution.js';
+import './contrib/ariaChatGuide/browser/ariaChatGuide.contribution.js';
 import './contrib/ariaSkills/browser/ariaSkills.contribution.js';
 import './contrib/ariaSettings/browser/ariaSettings.contribution.js';
 import './contrib/ariaMemory/browser/ariaMemory.contribution.js';

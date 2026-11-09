@@ -147,7 +147,7 @@ function withOverlay(fn: (c: AriaFirstRunOverlayContribution) => void): void {
 const KNOWN_TRACKERS: ReadonlySet<string> = new Set([
 	'aria-autopipe-mcp',
 	'aria-paper-search-mcp',
-	'aria-skills-firstrun',
+	// (Default skills are no longer tracked: they install after the loader is gone.)
 	'aria-roadmap-claude-code-install',
 	'aria-roadmap-mcp',
 	// These two MCP servers register late; without them here the overlay used to

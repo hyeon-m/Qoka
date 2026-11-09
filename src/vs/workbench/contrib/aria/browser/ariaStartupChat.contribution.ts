@@ -15,6 +15,7 @@ import { IQuickInputService, IQuickPickItem } from '../../../../platform/quickin
 import { IWorkspaceContextService, WorkbenchState } from '../../../../platform/workspace/common/workspace.js';
 import { IExtensionService } from '../../../services/extensions/common/extensions.js';
 import { IProductService } from '../../../../platform/product/common/productService.js';
+import { IProgressService, ProgressLocation } from '../../../../platform/progress/common/progress.js';
 import { IWorkbenchLayoutService, Parts } from '../../../services/layout/browser/layoutService.js';
 import { timeout } from '../../../../base/common/async.js';
 import { isWindows } from '../../../../base/common/platform.js';
@@ -59,6 +60,7 @@ class AriaStartupChatContribution extends Disposable implements IWorkbenchContri
 		@IExtensionService private readonly extensionService: IExtensionService,
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
 		@IProductService private readonly productService: IProductService,
+		@IProgressService private readonly progressService: IProgressService,
 	) {
 		super();
 
@@ -87,15 +89,21 @@ class AriaStartupChatContribution extends Disposable implements IWorkbenchContri
 		// Registered before the empty-workbench return so it exists in every window.
 		this._register(CommandsRegistry.registerCommand('aria.mcp.reconnect', (_acc, arg) => this._reconnectMcp(arg)));
 
+		// Work that must not hold the "Preparing Qoka" loader (installing the default skills)
+		// waits for this: it resolves once the loader is gone (at once in a window without one).
+		this._register(CommandsRegistry.registerCommand('aria.startup.whenLoaded', () => this._loaded));
+
 		if (this.workspaceContextService.getWorkbenchState() === WorkbenchState.EMPTY) {
+			this._markLoaded();
 			return;
 		}
 
-		// Keep the right-hand chat panel (auxiliary bar) pinned open in every
-		// project window, even before any assistant is installed - the chat
-		// surface should always be present, and a just-installed provider's chat
-		// then appears in that same spot instead of the panel popping in later.
-		try { this.layoutService.setPartHidden(false, Parts.AUXILIARYBAR_PART); } catch { /* layout not ready */ }
+		// The right-hand chat panel stays CLOSED until this window's MCP registration is
+		// written (local and remote windows alike): Claude Code / Codex read the MCP config
+		// once, when their chat starts, and a chat in a closed panel does not start. It opens
+		// with the chat once registration ran. With no AI extension installed there is nothing
+		// to wait for: the "install an AI extension" guide opens it at once (ariaChatGuide).
+		try { this.layoutService.setPartHidden(true, Parts.AUXILIARYBAR_PART); } catch { /* layout not ready */ }
 
 		// CLI install + MCP registration happen INSIDE the first-run gate below (it
 		// awaits the CLI install, then holds the loader until every server reports it
@@ -125,6 +133,8 @@ class AriaStartupChatContribution extends Disposable implements IWorkbenchContri
 			if (!pickedAi) {
 				this._setupGateDone = true;
 				hideLoading();
+				this._markLoaded();
+				try { this.layoutService.setPartHidden(false, Parts.AUXILIARYBAR_PART); } catch { /* layout gone */ }
 				return;
 			}
 
@@ -147,10 +157,9 @@ class AriaStartupChatContribution extends Disposable implements IWorkbenchContri
 			this._logSlowestExtensions();
 
 			// Run the CLI+MCP chain AND the built-in run-environment gate IN PARALLEL:
-			// they are independent (CLI/MCP are host-side; the run env is WSL/Ubuntu). We
-			// still HOLD the loader until MCP registration completes (so the chat opens
-			// with every tool - no "open a new chat" dance), but by overlapping it with the
-			// Ubuntu-account wait the total is max(CLI/MCP, account) instead of the sum.
+			// they are independent (CLI/MCP are host-side; the run env is WSL/Ubuntu). The
+			// loader waits only for the run environment; the CLI+MCP chain finishes after it,
+			// and the chat panel opens once its config is written (so it has every tool).
 			let usable: ConcreteProvider[] = [];
 			let failed: ConcreteProvider[] = [];
 			let allRegistered = true;
@@ -221,14 +230,20 @@ class AriaStartupChatContribution extends Disposable implements IWorkbenchContri
 			const runEnvT0 = Date.now();
 			const runEnvDone = this._waitForBuiltinRunEnv(setLoadingText, showLoadingEscape)
 				.then(() => { console.log(`[qoka-timing] run environment wait: ${Date.now() - runEnvT0}ms`); tl('run environment ready'); });
-			await Promise.all([
-				cliMcp.then(() => console.log(`[qoka-timing] CLI+MCP chain: ${Date.now() - prepT0}ms`)),
-				runEnvDone,
-			]);
+			// The loader holds ONLY for the extensions to come up (awaited above) and, on
+			// Windows, the run environment (the Ubuntu account step needs the user). MCP
+			// registration, opening the chat and the default skills all continue AFTER it,
+			// so the window is usable at once; the status bar shows the AI tools connecting.
+			await runEnvDone;
 			console.log(`[qoka-timing] "Preparing Qoka" TOTAL (loader visible): ${Date.now() - prepT0}ms`);
-			this._setupGateDone = true;
 			hideLoading();
+			this._markLoaded();
 			tl('loader hidden (TOTAL incl. extension activation)');
+			await this.progressService.withProgress(
+				{ location: ProgressLocation.Window, title: 'Connecting AI tools' },
+				() => cliMcp.then(() => console.log(`[qoka-timing] CLI+MCP chain: ${Date.now() - prepT0}ms`)));
+			this._setupGateDone = true;
+			tl('MCP registration finished (after the loader)');
 
 			if (usable.length === 0) {
 				this.notificationService.warn('Qoka could not set up the AI command-line tool. Check your internet connection, then reload the window to retry.');
@@ -247,6 +262,8 @@ class AriaStartupChatContribution extends Disposable implements IWorkbenchContri
 			// lights up with all of them the moment the extension finishes installing
 			// (_revealWhenInstalled watches for that). If the extension is already
 			// present, just reveal the chat now.
+			// Registration ran: open the chat panel now (closed since the window opened).
+			try { this.layoutService.setPartHidden(false, Parts.AUXILIARYBAR_PART); } catch { /* layout gone */ }
 			const missingExtensions = await this._missingProviderExtensions();
 			if (missingExtensions.length > 0) {
 				const ids = missingExtensions.map(p => PROVIDER_EXTENSION_ID[p]);
@@ -262,6 +279,11 @@ class AriaStartupChatContribution extends Disposable implements IWorkbenchContri
 	 *  registered). Until then, the onDidChangeExtensions listener stays quiet so it
 	 *  can't reconcile concurrently with the gate or fire a premature toast. */
 	private _setupGateDone = false;
+
+	/** Resolves once the "Preparing Qoka" loader is gone (see aria.startup.whenLoaded). */
+	private _resolveLoaded!: () => void;
+	private readonly _loaded = new Promise<void>(r => { this._resolveLoaded = r; });
+	private _markLoaded(): void { this._resolveLoaded(); }
 
 	/** Every Qoka MCP extension exposes this command: re-run its registration
 	 *  with whatever provider CLIs are present, returning true if it NEWLY

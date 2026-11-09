@@ -12,6 +12,9 @@ import { isJsonRpcRequest, jsonRpcSuccess, jsonRpcError, JsonRpcErrorCodes, Json
 // 3756: distinct base from qoka-run (moved to 3752) and qoka-memory (3766) so the
 // first window gets clean, unique numbers. Both used to default to 3760, which
 // forced one onto a fallback even in a single window.
+/** How long the default port is retried (8 x 0.5 s) before an OS-assigned port. */
+const DEFAULT_PORT_TRIES = 8;
+const DEFAULT_PORT_RETRY_MS = 500;
 const DEFAULT_PORT = 3756;
 const HOST = '127.0.0.1';
 
@@ -50,7 +53,11 @@ export class AriaPaperLibraryMcpServer {
 		if (this.httpServer) {
 			return this.port;
 		}
-		const candidates = [DEFAULT_PORT, 0]; // clean port, else OS-assigned (multi-window safe)
+		// The default port is retried for a few seconds first: when a window reloads, the previous
+		// extension host can still hold it for a moment, and taking a random port instead would
+		// leave the AI chat's saved MCP config pointing at a dead port. A port held for longer
+		// (another window) then falls through to a unique OS-assigned port.
+		const candidates = [...Array(DEFAULT_PORT_TRIES).fill(DEFAULT_PORT), 0]; // clean port, else OS-assigned (multi-window safe)
 		for (const candidate of candidates) {
 			try {
 				const server = await this.tryListen(candidate);
@@ -65,6 +72,7 @@ export class AriaPaperLibraryMcpServer {
 					throw err;
 				}
 				console.warn(`[aria-paper-search] port ${candidate} in use, trying next…`);
+				if (candidate !== 0) { await new Promise(r => setTimeout(r, DEFAULT_PORT_RETRY_MS)); }
 			}
 		}
 		throw new Error('Could not find a free port for the paper-library MCP server');

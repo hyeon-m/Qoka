@@ -7,7 +7,7 @@ import * as vscode from 'vscode';
 import { buildDefaultServices, setSkillsServices, skillsServices } from './common/services';
 import { SkillInfo } from './common/types';
 import { runAddSkillWizard } from './wizards/addSkillWizard';
-import { runFirstRunWizardIfNeeded } from './wizards/firstRunWizard';
+import { runFirstRunWizardIfNeeded, skillInstallState } from './wizards/firstRunWizard';
 import { initLogger, log, showLogger } from './common/logger';
 import { setSkillAutoApprove } from './common/permissions';
 import { ensureEnvFile } from './common/envManager';
@@ -293,7 +293,12 @@ export function activate(context: vscode.ExtensionContext): void {
 	// Kick off the first-run wizard non-blockingly. It self-skips when
 	// defaults are already present, so the cost of always firing it is
 	// one read of the manifest plus one stat() per default skill.
-	void runFirstRunWizardIfNeeded();
+	// Default skills install AFTER the "Preparing Qoka" loader has gone, so a first-run
+	// download (uv + skills) never holds the window open.
+	void (async () => {
+		try { await vscode.commands.executeCommand('aria.startup.whenLoaded'); } catch { /* older workbench: start now */ }
+		await runFirstRunWizardIfNeeded();
+	})();
 }
 
 /** Snapshot returned to the sidebar view. Keep this in sync with the
@@ -327,6 +332,8 @@ interface AriaSkillsState {
 		 *  Drives the Required / Optional grouping in the env panel. */
 		required: boolean;
 	}[];
+	/** Default skills being installed right now (after the startup loader). */
+	installing: ReturnType<typeof skillInstallState>;
 	uvDetected: boolean;
 	uvPath: string | null;
 }
@@ -418,6 +425,7 @@ async function getState(): Promise<AriaSkillsState> {
 		envVars,
 		uvDetected: uvPath !== null,
 		uvPath,
+		installing: skillInstallState(),
 	};
 }
 

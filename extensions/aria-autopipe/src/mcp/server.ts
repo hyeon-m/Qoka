@@ -66,6 +66,9 @@ export interface McpServerOptions {
 	instructions?: string;
 }
 
+/** How long the default port is retried (8 x 0.5 s) before an OS-assigned port. */
+const DEFAULT_PORT_TRIES = 8;
+const DEFAULT_PORT_RETRY_MS = 500;
 export class QokaMcpServer {
 
 	private httpServer: http.Server | undefined;
@@ -96,7 +99,11 @@ export class QokaMcpServer {
 		// back from server.address(), so the registration records the ACTUAL port.
 		// No hand-maintained fallback range = no cross-server range overlap to babysit.
 		const base = this.opts.defaultPort;
-		const candidates = [base, 0 /* OS-assigned */];
+		// The default port is retried for a few seconds first: when a window reloads, the previous
+		// extension host can still hold it for a moment, and taking a random port instead would
+		// leave the AI chat's saved MCP config pointing at a dead port. A port held for longer
+		// (another window) then falls through to a unique OS-assigned port.
+		const candidates = [...Array(DEFAULT_PORT_TRIES).fill(base), 0];
 
 		for (const candidate of candidates) {
 			try {
@@ -114,6 +121,7 @@ export class QokaMcpServer {
 				// Port taken; try the next one. Most likely cause is the
 				// autopipe-app Tauri build holding 3748.
 				console.warn(`[aria-autopipe] port ${candidate} in use, trying next…`);
+				if (candidate !== 0) { await new Promise(r => setTimeout(r, DEFAULT_PORT_RETRY_MS)); }
 			}
 		}
 

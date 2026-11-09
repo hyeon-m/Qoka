@@ -7,7 +7,9 @@
 	"quality": "stable",
 	"downloadUrl": "https://qoka.org/download",
 	"configurationDefaults": {
-		"git.ignoreMissingGitWarning": true
+		"git.ignoreMissingGitWarning": true,
+		"terminal.integrated.enablePersistentSessions": false,
+		"terminal.integrated.hideOnStartup": "always"
 	},
 	"extensionEnabledApiProposals": {
 		"openai.chatgpt": [

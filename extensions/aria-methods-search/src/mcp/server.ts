@@ -9,6 +9,9 @@ import { URL } from 'url';
 import { ALL_TOOLS, findTool } from './tools';
 import { isJsonRpcRequest, jsonRpcSuccess, jsonRpcError, JsonRpcErrorCodes, JsonRpcRequest } from './jsonrpc';
 
+/** How long the default port is retried (8 x 0.5 s) before an OS-assigned port. */
+const DEFAULT_PORT_TRIES = 8;
+const DEFAULT_PORT_RETRY_MS = 500;
 const DEFAULT_PORT = 3794;
 const HOST = '127.0.0.1';
 
@@ -44,7 +47,11 @@ export class AriaMethodsSearchMcpServer {
 		if (this.httpServer) {
 			return this.port;
 		}
-		const candidates = [DEFAULT_PORT, 0]; // clean port, else OS-assigned (multi-window safe)
+		// The default port is retried for a few seconds first: when a window reloads, the previous
+		// extension host can still hold it for a moment, and taking a random port instead would
+		// leave the AI chat's saved MCP config pointing at a dead port. A port held for longer
+		// (another window) then falls through to a unique OS-assigned port.
+		const candidates = [...Array(DEFAULT_PORT_TRIES).fill(DEFAULT_PORT), 0]; // clean port, else OS-assigned (multi-window safe)
 		for (const candidate of candidates) {
 			try {
 				const server = await this.tryListen(candidate);
@@ -59,6 +66,7 @@ export class AriaMethodsSearchMcpServer {
 					throw err;
 				}
 				console.warn(`[aria-methods-search] port ${candidate} in use, trying next…`);
+				if (candidate !== 0) { await new Promise(r => setTimeout(r, DEFAULT_PORT_RETRY_MS)); }
 			}
 		}
 		throw new Error('Could not find a free port for the methods-search MCP server');

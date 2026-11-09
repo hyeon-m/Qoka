@@ -9,6 +9,9 @@ import { URL } from 'url';
 import { ToolDefinition } from './tools';
 import { isJsonRpcRequest, jsonRpcSuccess, jsonRpcError, JsonRpcErrorCodes, JsonRpcRequest } from './jsonrpc';
 
+/** How long the default port is retried (8 x 0.5 s) before an OS-assigned port. */
+const DEFAULT_PORT_TRIES = 8;
+const DEFAULT_PORT_RETRY_MS = 500;
 const DEFAULT_PORT = 3814;
 const HOST = '127.0.0.1';
 
@@ -92,7 +95,11 @@ export class QokaLoopMcpServer {
 		// Try the default port first, then fall back through a small range,
 		// finally let the OS assign one. The default is offset from the
 		// autopipe / paper-search ports so Qoka's three MCPs can coexist.
-		const candidates = [DEFAULT_PORT, 0]; // clean port, else OS-assigned (multi-window safe)
+		// The default port is retried for a few seconds first: when a window reloads, the previous
+		// extension host can still hold it for a moment, and taking a random port instead would
+		// leave the AI chat's saved MCP config pointing at a dead port. A port held for longer
+		// (another window) then falls through to a unique OS-assigned port.
+		const candidates = [...Array(DEFAULT_PORT_TRIES).fill(DEFAULT_PORT), 0]; // clean port, else OS-assigned (multi-window safe)
 
 		for (const candidate of candidates) {
 			try {
@@ -108,6 +115,7 @@ export class QokaLoopMcpServer {
 					throw e;
 				}
 				console.warn(`[qoka-loop] port ${candidate} in use, trying next...`);
+				if (candidate !== 0) { await new Promise(r => setTimeout(r, DEFAULT_PORT_RETRY_MS)); }
 			}
 		}
 

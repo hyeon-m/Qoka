@@ -12,6 +12,9 @@ import { isJsonRpcRequest, jsonRpcSuccess, jsonRpcError, JsonRpcErrorCodes, Json
 // Distinct from the other Qoka MCP ports (autopipe 3748, memory 3766, roadmap
 // 3780, notes 3786, paper 3790, methods 3794, overview 3802, loop 3814) so all
 // the built-in MCP servers can coexist without a boot-time port race.
+/** How long the default port is retried (8 x 0.5 s) before an OS-assigned port. */
+const DEFAULT_PORT_TRIES = 8;
+const DEFAULT_PORT_RETRY_MS = 500;
 const DEFAULT_PORT = 3826;
 const HOST = '127.0.0.1';
 
@@ -111,7 +114,11 @@ export class QokaSlidesMcpServer {
 			return this.port;
 		}
 
-		const candidates = [DEFAULT_PORT, 0]; // clean port, else OS-assigned (multi-window safe)
+		// The default port is retried for a few seconds first: when a window reloads, the previous
+		// extension host can still hold it for a moment, and taking a random port instead would
+		// leave the AI chat's saved MCP config pointing at a dead port. A port held for longer
+		// (another window) then falls through to a unique OS-assigned port.
+		const candidates = [...Array(DEFAULT_PORT_TRIES).fill(DEFAULT_PORT), 0]; // clean port, else OS-assigned (multi-window safe)
 
 		for (const candidate of candidates) {
 			try {
@@ -127,6 +134,7 @@ export class QokaSlidesMcpServer {
 					throw e;
 				}
 				console.warn(`[qoka-slides] port ${candidate} in use, trying next…`);
+				if (candidate !== 0) { await new Promise(r => setTimeout(r, DEFAULT_PORT_RETRY_MS)); }
 			}
 		}
 

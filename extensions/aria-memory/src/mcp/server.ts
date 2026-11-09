@@ -13,6 +13,9 @@ import { isJsonRpcRequest, jsonRpcSuccess, jsonRpcError, JsonRpcErrorCodes, Json
 // across launches (autopipe 3748-, paper-search 3760-, aria-memory 3766-,
 // roadmap 3780-, notes 3786-, paper 3790-). Overlapping ranges caused a boot
 // race where the persisted registration went stale and the chat couldn't connect.
+/** How long the default port is retried (8 x 0.5 s) before an OS-assigned port. */
+const DEFAULT_PORT_TRIES = 8;
+const DEFAULT_PORT_RETRY_MS = 500;
 const DEFAULT_PORT = 3766;
 const HOST = '127.0.0.1';
 
@@ -74,7 +77,11 @@ export class AriaMemoryMcpServer {
 
 		// Try the default port first, then fall back through a small range,
 		// finally let the OS assign one.
-		const candidates = [DEFAULT_PORT, 0]; // clean port, else OS-assigned (multi-window safe)
+		// The default port is retried for a few seconds first: when a window reloads, the previous
+		// extension host can still hold it for a moment, and taking a random port instead would
+		// leave the AI chat's saved MCP config pointing at a dead port. A port held for longer
+		// (another window) then falls through to a unique OS-assigned port.
+		const candidates = [...Array(DEFAULT_PORT_TRIES).fill(DEFAULT_PORT), 0]; // clean port, else OS-assigned (multi-window safe)
 
 		for (const candidate of candidates) {
 			try {
@@ -90,6 +97,7 @@ export class AriaMemoryMcpServer {
 					throw e;
 				}
 				console.warn(`[aria-memory] port ${candidate} in use, trying next…`);
+				if (candidate !== 0) { await new Promise(r => setTimeout(r, DEFAULT_PORT_RETRY_MS)); }
 			}
 		}
 

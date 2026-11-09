@@ -4,6 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { $, append, clearNode } from '../../../../../base/browser/dom.js';
+import { renderIcon } from '../../../../../base/browser/ui/iconLabel/iconLabels.js';
+import { Codicon } from '../../../../../base/common/codicons.js';
+import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { ariaHelpActionId } from '../../../aria/browser/ariaHelpEditor.js';
 import { SettingsSection } from './settingsSection.js';
@@ -24,7 +27,7 @@ interface SkillRow {
 	optionalMissingCount?: number;
 }
 interface EnvVarRow { name: string; value: string; required?: boolean }
-interface SkillsState { defaults: SkillRow[]; users: SkillRow[]; categories: string[]; envVars: EnvVarRow[] }
+interface SkillsState { defaults: SkillRow[]; users: SkillRow[]; categories: string[]; envVars: EnvVarRow[]; installing?: { running: boolean; done: number; total: number; current: string } }
 
 /** Default-skill groups that render as their own nested collapsible subgroup under
  *  Default Skills (mirrors the retired Skills view). */
@@ -70,6 +73,20 @@ export class SkillsSection extends SettingsSection {
 			p.textContent = 'Loading skills...';
 			Object.assign(p.style, { opacity: '0.6', fontSize: '12px' });
 			return;
+		}
+
+		// Default skills install in the background after Qoka finishes loading: show it here.
+		if (state.installing?.running) {
+			const busy = append(this.body, $('div'));
+			Object.assign(busy.style, {
+				display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px', padding: '8px 10px', fontSize: '12px', borderRadius: '6px',
+				background: 'var(--vscode-editorWidget-background, rgba(127,127,127,0.08))', border: '1px solid var(--vscode-widget-border, rgba(127,127,127,0.25))',
+			});
+			const spin = append(busy, renderIcon(ThemeIcon.modify(Codicon.loading, 'spin')));
+			spin.style.flexShrink = '0';
+			const label = append(busy, $('span'));
+			const { done, total, current } = state.installing;
+			label.textContent = `Installing default skills (${Math.min(done + 1, total)} of ${total})${current ? ': ' + current : ''}...`;
 		}
 
 		// Toolbar: search + category dropdown + Add. Built once; typing re-renders only

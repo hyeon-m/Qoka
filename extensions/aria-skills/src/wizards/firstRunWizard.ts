@@ -27,46 +27,46 @@ import { EnvVarRequirement, SkillDependency, SkillInfo } from '../common/types';
  * unset so the next launch can retry.
  */
 
+/** Default-skill install progress, for the Settings tab's Skills section (spinner). */
+export interface SkillInstallState { running: boolean; done: number; total: number; current: string }
+let installState: SkillInstallState = { running: false, done: 0, total: 0, current: '' };
+export function skillInstallState(): SkillInstallState { return { ...installState }; }
+function setInstallState(next: SkillInstallState): void {
+	installState = next;
+	void vscode.commands.executeCommand('aria.skills.requestRefresh').then(undefined, () => { /* Settings not open */ });
+}
+
+/**
+ * Installs any missing default skill. Runs AFTER the "Preparing Qoka" loader has gone (the
+ * caller waits for it), so a first-run download never holds the window; the Settings tab's
+ * Skills section shows a spinner meanwhile. A session that starts before a skill lands picks
+ * it up in its next chat.
+ */
 export async function runFirstRunWizardIfNeeded(): Promise<void> {
 	const svc = skillsServices();
 	const manifest = svc.manifest.readManifest();
 	const installedNames = svc.skills.listManaged().map(s => s.name);
 	const missing = findMissingDefaultSkills(installedNames);
 
-	// Always join the workbench startup tracking, even when there's
-	// nothing to install - the summary toast still wants a line about
-	// the default skills so the user sees their presence acknowledged.
-	// We avoid listing individual skill names so the row stays stable
-	// as the default set grows.
-	// BEST-EFFORT: this is cosmetic (one row in the startup toast). It used to be
-	// awaited unguarded, so on a fresh profile where the workbench hasn't
-	// registered aria.startup.* yet the rejection aborted the ENTIRE wizard before
-	// a single skill was installed - silently, because the caller does
-	// `void runFirstRunWizardIfNeeded()`. Never let it block the install.
-	try {
-		await vscode.commands.executeCommand('aria.startup.beginTracking', 'aria-skills-firstrun');
-	} catch { /* startup overlay not up yet - install the defaults anyway */ }
-
-	let summary = 'Default skills - already configured';
-	let changed = false;
 	let installedCount = 0;
 	let failedCount = 0;
 
-	try {
-		if (missing.length === 0) {
-			// All defaults present. Mark first-run as completed if it
-			// wasn't already (e.g. defaults arrived via a manual install
-			// before Qoka saw them) so we don't re-check on every launch.
-			if (!manifest.firstRunCompleted) {
-				svc.manifest.markFirstRunCompleted();
-			}
-			return;
+	if (missing.length === 0) {
+		// All defaults present. Mark first-run as completed if it
+		// wasn't already (e.g. defaults arrived via a manual install
+		// before Qoka saw them) so we don't re-check on every launch.
+		if (!manifest.firstRunCompleted) {
+			svc.manifest.markFirstRunCompleted();
 		}
+		return;
+	}
 
-		log(`First-run wizard triggered. Missing ${missing.length} default skill(s).`);
-
+	log(`First-run wizard triggered. Missing ${missing.length} default skill(s).`);
+	setInstallState({ running: true, done: 0, total: missing.length, current: 'Installing uv' });
+	try {
 		await ensureUvInstalled();
 		for (const spec of missing) {
+			setInstallState({ running: true, done: installedCount + failedCount, total: missing.length, current: spec.name });
 			try {
 				await installOneDefault(spec);
 				installedCount++;
@@ -81,29 +81,10 @@ export async function runFirstRunWizardIfNeeded(): Promise<void> {
 			svc.manifest.markFirstRunCompleted();
 		}
 	} finally {
-		if (installedCount > 0 && failedCount === 0) {
-			summary = 'Default skills installed';
-			changed = true;
-		} else if (installedCount > 0) {
-			summary = `Default skills installed (${failedCount} failed)`;
-			changed = true;
-		} else if (failedCount > 0) {
-			summary = `Default skill install failed`;
-			changed = false;
-		}
-		// else: missing was empty → leaves the "already configured" default
-
-		// Best-effort for the same reason as beginTracking above: a missing
-		// startup-tracking command must not turn a successful install into a
-		// thrown finally block.
-		try {
-			await vscode.commands.executeCommand(
-				'aria.startup.markComplete',
-				'aria-skills-firstrun',
-				summary,
-				changed,
-			);
-		} catch { /* startup overlay not up - nothing to report to */ }
+		setInstallState({ running: false, done: installedCount + failedCount, total: missing.length, current: '' });
+	}
+	if (failedCount > 0) {
+		void vscode.window.showWarningMessage(`${failedCount} default skill${failedCount === 1 ? '' : 's'} could not be installed. Qoka will try again next time it starts.`);
 	}
 
 	// If anything actually changed on disk, ping the Skills sidebar so
