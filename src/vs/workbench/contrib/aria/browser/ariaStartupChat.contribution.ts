@@ -538,9 +538,9 @@ class AriaStartupChatContribution extends Disposable implements IWorkbenchContri
 		}
 		// `silent` suppresses the toast during onboarding / first-run setup (the user
 		// hasn't opened a chat yet, so "open a NEW chat" would be premature).
-		if (anyChanged && !silent) {
-			this.notificationService.info('Qoka tools connected. Open a NEW Claude or Codex chat to use them.');
-		}
+		// No "Qoka tools connected" toast: the chat panel opens only after registration, so the
+		// chat already has every tool; the toast only arrived late and said nothing new.
+		void silent;
 		return { anyChanged, registeredCount };
 	}
 
@@ -592,6 +592,7 @@ class AriaStartupChatContribution extends Disposable implements IWorkbenchContri
 		// dynamically-registered command won't auto-activate its extension). Only that one
 		// extension: waiting for every extension (onStartupFinished) held this screen several
 		// seconds longer for nothing; the rest keep starting in the background.
+		const t0 = Date.now();
 		try {
 			await this.extensionService.whenInstalledExtensionsRegistered();
 			const skills = this.extensionService.extensions.find(d => d.identifier.value.toLowerCase() === 'aria.aria-skills');
@@ -601,9 +602,13 @@ class AriaStartupChatContribution extends Disposable implements IWorkbenchContri
 				await this.extensionService.activateByEvent('onStartupFinished');
 			}
 		} catch { /* ignore: the install below then fails and the project window retries */ }
+		console.log(`[qoka-timing] AI setup: aria-skills ready in ${Date.now() - t0}ms`);
 		for (const p of chosen) {
+			const p0 = Date.now();
 			try { await this.commandService.executeCommand('aria.provider.installCli', p); } catch { /* ignore */ }
+			console.log(`[qoka-timing] AI setup: ${p} command-line tool ready in ${Date.now() - p0}ms`);
 		}
+		console.log(`[qoka-timing] AI setup ("Setting up your AI assistant") TOTAL: ${Date.now() - t0}ms`);
 	}
 
 	/**
