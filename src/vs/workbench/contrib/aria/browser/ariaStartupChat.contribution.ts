@@ -152,9 +152,20 @@ class AriaStartupChatContribution extends Disposable implements IWorkbenchContri
 			tl(`providers chosen: [${chosen.join(', ')}]`);
 			this._logFirstLaunchOfBuild();
 			const actT0 = Date.now();
-			try { await this.extensionService.activateByEvent('onStartupFinished'); } catch { /* ignore */ }
-			tl(`extension activation (onStartupFinished) done: ${Date.now() - actT0}ms`);
-			this._logSlowestExtensions();
+			// Start Qoka's own extensions (mostly the MCP servers) now, by id: that skips the
+			// extension host's "eager extensions first, or 10 s" rule for onStartupFinished, which
+			// held them back ~10 s. The LOADER does not wait for them: only the chat does (the
+			// CLI+MCP chain below awaits this, and the chat panel stays closed until registration).
+			// Every other extension (Claude Code, Codex, emmet, …) keeps starting by itself.
+			const activateOwn = async (filter: (id: string) => boolean): Promise<number> => {
+				await this.extensionService.whenInstalledExtensionsRegistered();
+				const own = this.extensionService.extensions.filter(d => d.publisher === 'aria' && (d.activationEvents ?? []).includes('onStartupFinished') && filter(d.identifier.value));
+				await Promise.all(own.map(d => this.extensionService.activateById(d.identifier, { startup: true, extensionId: d.identifier, activationEvent: 'onStartupFinished' }).catch(() => { /* one failing must not hold the rest */ })));
+				return own.length;
+			};
+			const ownActivated = activateOwn(() => true)
+				.then(n => { tl(`Qoka extensions activated: ${n} in ${Date.now() - actT0}ms`); this._logSlowestExtensions(); })
+				.catch(async () => { try { await this.extensionService.activateByEvent('onStartupFinished'); } catch { /* ignore */ } });
 
 			// Run the CLI+MCP chain AND the built-in run-environment gate IN PARALLEL:
 			// they are independent (CLI/MCP are host-side; the run env is WSL/Ubuntu). The
@@ -164,6 +175,7 @@ class AriaStartupChatContribution extends Disposable implements IWorkbenchContri
 			let failed: ConcreteProvider[] = [];
 			let allRegistered = true;
 			const cliMcp = (async () => {
+				await ownActivated;
 				try {
 					// Install + verify each chosen provider's CLI. "installed but still absent
 					// after one retry" is a real FAILURE, so a failed install ends the wait
@@ -228,17 +240,20 @@ class AriaStartupChatContribution extends Disposable implements IWorkbenchContri
 			// (provisioning finishes in the background).
 			const prepT0 = Date.now();
 			const runEnvT0 = Date.now();
-			const runEnvDone = this._waitForBuiltinRunEnv(setLoadingText, showLoadingEscape)
+			// The run-environment check asks aria-autopipe, so on Windows only that one extension
+			// must be up first; elsewhere there is nothing to check.
+			const runEnvDone = (isWindows ? activateOwn(id => id === 'aria.aria-autopipe').catch(() => 0) : Promise.resolve(0))
+				.then(() => this._waitForBuiltinRunEnv(setLoadingText, showLoadingEscape))
 				.then(() => { console.log(`[qoka-timing] run environment wait: ${Date.now() - runEnvT0}ms`); tl('run environment ready'); });
-			// The loader holds ONLY for the extensions to come up (awaited above) and, on
-			// Windows, the run environment (the Ubuntu account step needs the user). MCP
-			// registration, opening the chat and the default skills all continue AFTER it,
-			// so the window is usable at once; the status bar shows the AI tools connecting.
+			// The loader holds ONLY for the run environment on Windows (the Ubuntu account step
+			// needs the user). Qoka's extensions, MCP registration, the chat panel and the default
+			// skills all continue AFTER it, so the window is usable at once; the chat opens once
+			// every tool is registered.
 			await runEnvDone;
 			console.log(`[qoka-timing] "Preparing Qoka" TOTAL (loader visible): ${Date.now() - prepT0}ms`);
 			hideLoading();
 			this._markLoaded();
-			tl('loader hidden (TOTAL incl. extension activation)');
+			tl('loader hidden');
 			await this.progressService.withProgress(
 				{ location: ProgressLocation.Window, title: 'Connecting AI tools' },
 				() => cliMcp.then(() => console.log(`[qoka-timing] CLI+MCP chain: ${Date.now() - prepT0}ms`)));
@@ -844,7 +859,7 @@ class AriaStartupChatContribution extends Disposable implements IWorkbenchContri
 				// the loader clear so the workbench is usable now.
 				return;
 			}
-			let st: { status?: string; progress?: { message?: string }; wslPhase?: string; wslSetupPending?: boolean } | undefined;
+			let st: { status?: string; progress?: { message?: string }; wslPhase?: string; wslLaunchDecided?: boolean; wslSetupPending?: boolean } | undefined;
 			try {
 				st = await this.commandService.executeCommand('aria.autopipe.vm.status');
 			} catch {
@@ -915,6 +930,15 @@ class AriaStartupChatContribution extends Disposable implements IWorkbenchContri
 				if (seenActive || Date.now() >= graceUntil) {
 					return;
 				}
+				// aria-autopipe has decided this launch (WSL probed, setup started or not needed) and
+				// nothing is pending: there is nothing to wait for. Without this signal the loader sat
+				// out the whole grace period on every launch of an already set-up PC (~9 s).
+				if (st?.wslLaunchDecided) {
+					return;
+				}
+				// Not decided yet (the WSL probe is still running): look again soon.
+				await timeout(300);
+				continue;
 			}
 			await timeout(1500);
 		}
