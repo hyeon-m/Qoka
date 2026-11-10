@@ -194,10 +194,10 @@ export async function listDistrosFromRegistry(): Promise<string[] | undefined> {
  *  `{GUID}` key name). WSL creates a NEW ID every time a distro is registered, so the ID
  *  tells a reinstalled "Ubuntu" apart from the one that was there before. Same rules
  *  and `undefined` semantics as listDistrosFromRegistry. */
-export async function registryDistros(): Promise<{ name: string; id: string }[] | undefined> {
+export async function registryDistros(timeoutMs = 5_000): Promise<{ name: string; id: string }[] | undefined> {
 	if (process.platform !== 'win32') { return undefined; }
 	try {
-		const { stdout } = await rawExecFileAsync('reg.exe', ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss', '/s'], { windowsHide: true, timeout: 5_000 });
+		const { stdout } = await rawExecFileAsync('reg.exe', ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss', '/s'], { windowsHide: true, timeout: timeoutMs });
 		const found: { name: string; id: string }[] = [];
 		// One block per key: a "HKEY_..." header line, then "    Name    REG_TYPE    data".
 		for (const block of stripNuls(stdout).split(/\n\s*\n/)) {

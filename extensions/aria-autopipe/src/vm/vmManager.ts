@@ -293,8 +293,27 @@ export class VMManager {
 	}
 
 	private rememberWslAccount(distro: string, user: string, distroId: string | undefined): void {
-		if (!distroId) { this.forgetWslAccount(); return; }
+		if (!distroId) {
+			// The registry read did not answer in time (seen right after WSL was installed). Keep any
+			// record as it is: it names the registration ID, and whoever trusts it (the startup loader)
+			// checks that ID against the registry itself, so a removed or reinstalled Ubuntu never
+			// matches. Look the ID up again in the background with more time, and record it then.
+			void this.rememberWslAccountLater(distro, user);
+			return;
+		}
 		try { fs.writeFileSync(this.wslAccountFile, JSON.stringify({ distro, id: distroId, user })); } catch { /* best-effort */ }
+	}
+
+	private async rememberWslAccountLater(distro: string, user: string): Promise<void> {
+		for (const timeoutMs of [15_000, 30_000]) {
+			const t0 = Date.now();
+			const id = (await registryDistros(timeoutMs))?.find(d => d.name === distro)?.id;
+			console.log(`[qoka-timing] WSL registration ID lookup (background, ${timeoutMs}ms limit): ${id ? 'found' : 'not found'} in ${Date.now() - t0}ms`);
+			if (id) {
+				try { fs.writeFileSync(this.wslAccountFile, JSON.stringify({ distro, id, user })); } catch { /* best-effort */ }
+				return;
+			}
+		}
 	}
 
 	private forgetWslAccount(): void {

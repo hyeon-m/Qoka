@@ -589,8 +589,18 @@ class AriaStartupChatContribution extends Disposable implements IWorkbenchContri
 	private async _prepareProviders(providers: unknown[]): Promise<void> {
 		const chosen = providers.filter((p): p is ConcreteProvider => p === 'claude' || p === 'codex');
 		// aria-skills owns installProviderCli; make sure it's active first (a
-		// dynamically-registered command won't auto-activate its extension).
-		try { await this.extensionService.activateByEvent('onStartupFinished'); } catch { /* ignore */ }
+		// dynamically-registered command won't auto-activate its extension). Only that one
+		// extension: waiting for every extension (onStartupFinished) held this screen several
+		// seconds longer for nothing; the rest keep starting in the background.
+		try {
+			await this.extensionService.whenInstalledExtensionsRegistered();
+			const skills = this.extensionService.extensions.find(d => d.identifier.value.toLowerCase() === 'aria.aria-skills');
+			if (skills) {
+				await this.extensionService.activateById(skills.identifier, { startup: false, extensionId: skills.identifier, activationEvent: 'onStartupFinished' });
+			} else {
+				await this.extensionService.activateByEvent('onStartupFinished');
+			}
+		} catch { /* ignore: the install below then fails and the project window retries */ }
 		for (const p of chosen) {
 			try { await this.commandService.executeCommand('aria.provider.installCli', p); } catch { /* ignore */ }
 		}
