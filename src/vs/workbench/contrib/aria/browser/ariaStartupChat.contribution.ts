@@ -19,6 +19,11 @@ import { IProgressService, ProgressLocation } from '../../../../platform/progres
 import { IWorkbenchLayoutService, Parts } from '../../../services/layout/browser/layoutService.js';
 import { timeout } from '../../../../base/common/async.js';
 import { isWindows } from '../../../../base/common/platform.js';
+import { URI } from '../../../../base/common/uri.js';
+import { IFileService } from '../../../../platform/files/common/files.js';
+import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
+import { INativeHostService } from '../../../../platform/native/common/native.js';
+import { IUserDataProfileService } from '../../../services/userDataProfile/common/userDataProfile.js';
 import { revealAiProviderChat } from './aiProviderChat.js';
 import { whenAriaMcpServersReady, markAriaMcpRegistered, isAriaMcpServersReady, describeSetupPending } from './ariaSetupReady.js';
 import { ConcreteProvider, hasPickedAiProvider, takePendingInstall, PROVIDER_EXTENSION_ID, PROVIDER_LABEL } from './ariaAiProviderChoice.js';
@@ -61,6 +66,9 @@ class AriaStartupChatContribution extends Disposable implements IWorkbenchContri
 		@IWorkbenchLayoutService private readonly layoutService: IWorkbenchLayoutService,
 		@IProductService private readonly productService: IProductService,
 		@IProgressService private readonly progressService: IProgressService,
+		@IFileService private readonly fileService: IFileService,
+		@IUserDataProfileService private readonly userDataProfileService: IUserDataProfileService,
+		@IInstantiationService private readonly instantiationService: IInstantiationService,
 	) {
 		super();
 
@@ -242,8 +250,16 @@ class AriaStartupChatContribution extends Disposable implements IWorkbenchContri
 			const runEnvT0 = Date.now();
 			// The run-environment check asks aria-autopipe, so on Windows only that one extension
 			// must be up first; elsewhere there is nothing to check.
-			const runEnvDone = (isWindows ? activateOwn(id => id === 'aria.aria-autopipe').catch(() => 0) : Promise.resolve(0))
-				.then(() => this._waitForBuiltinRunEnv(setLoadingText, showLoadingEscape))
+			// Windows: when the Ubuntu that aria-autopipe last confirmed (with a real account) is still
+			// the one registered on this PC, there is nothing for the user to do, so the loader does
+			// not wait for aria-autopipe (bringing the extension host up took ~13 s). Checked live each
+			// launch: Ubuntu removed or reinstalled -> no match -> the full check below, as before.
+			// aria-autopipe still checks everything in the background and opens the account window
+			// itself if needed.
+			const runEnvKnownReady = isWindows ? await this._wslAlreadySetUp() : false;
+			tl(`run environment already set up (same Ubuntu as last confirmed): ${runEnvKnownReady}`);
+			const runEnvDone = (isWindows && !runEnvKnownReady ? activateOwn(id => id === 'aria.aria-autopipe').catch(() => 0) : Promise.resolve(0))
+				.then(() => runEnvKnownReady ? undefined : this._waitForBuiltinRunEnv(setLoadingText, showLoadingEscape))
 				.then(() => { console.log(`[qoka-timing] run environment wait: ${Date.now() - runEnvT0}ms`); tl('run environment ready'); });
 			// The loader holds ONLY for the run environment on Windows (the Ubuntu account step
 			// needs the user). Qoka's extensions, MCP registration, the chat panel and the default
@@ -827,6 +843,31 @@ class AriaStartupChatContribution extends Disposable implements IWorkbenchContri
 			console.log(`[qoka-timing] extensions activated: ${rows.length}, sum load ${totalLoad}ms, sum activate ${totalActivate}ms (they overlap, so sums exceed wall time)`);
 			console.log(`[qoka-timing] slowest extensions: ${rows.slice(0, 10).map(r => `${r.id} load ${r.load}ms + activate ${r.activate}ms`).join(', ')}`);
 		} catch { /* diagnostics only */ }
+	}
+
+	/**
+	 * Windows: is the Ubuntu that aria-autopipe last confirmed with a real (non-root) account still
+	 * the one registered for this user? aria-autopipe writes that record (its globalStorage
+	 * vm/wsl-account.json: distro name, WSL registration ID, user) only once the account is seen,
+	 * and deletes it when the account is missing. WSL gives a distro a new registration ID on every
+	 * (re)install, so a removed or reinstalled Ubuntu never matches. Read from here (file + one
+	 * registry value), without waiting for the extension host. Any doubt -> false (full check).
+	 */
+	private async _wslAlreadySetUp(): Promise<boolean> {
+		if (!isWindows) { return false; }
+		try {
+			const file = URI.joinPath(this.userDataProfileService.currentProfile.globalStorageHome, 'aria.aria-autopipe', 'vm', 'wsl-account.json');
+			const rec = JSON.parse((await this.fileService.readFile(file)).value.toString()) as { distro?: unknown; id?: unknown; user?: unknown };
+			const distro = typeof rec.distro === 'string' ? rec.distro : '';
+			const id = typeof rec.id === 'string' ? rec.id : '';
+			const user = typeof rec.user === 'string' ? rec.user : '';
+			if (!distro || !/^\{[0-9a-f-]+\}$/i.test(id) || !user || user === 'root') { return false; }
+			const nativeHost = this.instantiationService.invokeFunction(accessor => accessor.get(INativeHostService));
+			const name = await nativeHost.windowsGetStringRegKey('HKEY_CURRENT_USER', `Software\\Microsoft\\Windows\\CurrentVersion\\Lxss\\${id}`, 'DistributionName');
+			return name === distro;
+		} catch {
+			return false;
+		}
 	}
 
 	private async _waitForBuiltinRunEnv(setText: (s: string) => void, showEscape: (label: string, onClick: () => void) => void): Promise<void> {
