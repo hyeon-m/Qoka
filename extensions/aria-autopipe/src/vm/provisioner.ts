@@ -123,7 +123,7 @@ async function extractTarGzWithNode(tgz: string, destDir: string): Promise<void>
  */
 
 const RELEASE_BASE = process.env.ARIA_VM_RELEASE_BASE
-	|| 'https://github.com/khyeonm/Qoka/releases/download/vm-assets-v1';
+	|| 'https://github.com/hyeon-m/Qoka/releases/download/vm-assets-v1';
 
 // Bumped whenever the published qoka-vm-<arch>.qcow2 changes in a way that a
 // cached copy must be replaced. v2 = docker baked in + disk resized to 20G.

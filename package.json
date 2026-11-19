@@ -259,10 +259,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/khyeonm/Qoka.git"
+    "url": "https://github.com/hyeon-m/Qoka.git"
   },
   "bugs": {
-    "url": "https://github.com/khyeonm/Qoka/issues"
+    "url": "https://github.com/hyeon-m/Qoka/issues"
   },
   "optionalDependencies": {
     "windows-foreground-love": "0.6.1"
