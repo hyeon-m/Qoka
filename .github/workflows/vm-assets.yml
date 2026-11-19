@@ -22,11 +22,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14        # Apple Silicon (native)
+          - os: macos-15        # Apple Silicon (native)
             plat: darwin
             arch: arm64
             qarch: aarch64
-          - os: macos-14        # Intel, cross-produced on the ARM runner
+          - os: macos-15        # Intel, cross-produced on the ARM runner
             plat: darwin        # (the dedicated macos-13 runner has ~zero
             arch: x64           #  capacity and hangs forever). See build step.
             qarch: x86_64
@@ -173,7 +173,7 @@ jobs:
   # Mac the built-in VM boots under vfkit instead - same per-user local VM, no
   # HVF. Networking is user-mode via gvproxy (no vmnet entitlement required).
   vfkit:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - name: Download, sign, and package vfkit + gvproxy
         shell: bash

@@ -9,7 +9,7 @@
 # The release_tag deliberately does NOT match release-app.yml's `qoka-v*` trigger
 # glob, so creating it can never kick off the normal arm64-.dmg / x64-.exe build.
 #
-# macOS Intel: cross-built on the macos-14 (arm64) runner - host node stays arm64
+# macOS Intel: cross-built on the macos-15 (arm64) runner - host node stays arm64
 # while npm_config_arch=x64 targets Intel (GitHub's macos-13 Intel runner hangs);
 # signed + notarized when the Apple secrets are present (same path as release-app).
 # Windows ARM64: native windows-11-arm runner, UNSIGNED (SmartScreen warns ->
@@ -66,7 +66,7 @@ jobs:
   # Intel macOS (.dmg + .zip), cross-built on the arm64 runner and signed/notarized.
   build-mac-intel:
     needs: [init]
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
